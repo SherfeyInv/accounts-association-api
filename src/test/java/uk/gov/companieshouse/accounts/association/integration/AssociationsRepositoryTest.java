@@ -1,8 +1,10 @@
 package uk.gov.companieshouse.accounts.association.integration;
 
 import jakarta.validation.ConstraintViolationException;
-import java.util.HashSet;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -10,6 +12,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.UncategorizedMongoDbException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.test.annotation.DirtiesContext;
@@ -21,16 +24,15 @@ import uk.gov.companieshouse.accounts.association.models.AssociationDao;
 import uk.gov.companieshouse.accounts.association.models.InvitationDao;
 import uk.gov.companieshouse.accounts.association.repositories.AssociationsRepository;
 import uk.gov.companieshouse.accounts.association.utils.ApiClientUtil;
-import java.util.Set;
-import org.springframework.data.mongodb.UncategorizedMongoDbException;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
 import uk.gov.companieshouse.accounts.association.utils.StaticPropertyUtil;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.ApprovalRouteEnum;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.StatusEnum;
+import uk.gov.companieshouse.email_producer.EmailProducer;
+import uk.gov.companieshouse.email_producer.factory.KafkaProducerFactory;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -46,6 +48,12 @@ class AssociationsRepositoryTest {
     MongoTemplate mongoTemplate;
 
     @MockBean
+    EmailProducer emailProducer;
+
+    @MockBean
+    KafkaProducerFactory kafkaProducerFactory;
+
+    @MockBean
     ApiClientUtil apiClientUtil;
 
     @Autowired
@@ -59,6 +67,8 @@ class AssociationsRepositoryTest {
 
     @BeforeEach
     public void setup() {
+        final var now = LocalDateTime.now();
+
         final var associationOne = new AssociationDao();
         associationOne.setId("111");
         associationOne.setCompanyNumber("12345");
@@ -166,10 +176,156 @@ class AssociationsRepositoryTest {
         associationEleven.setEtag("x");
         associationEleven.setApprovalRoute( ApprovalRouteEnum.AUTH_CODE.getValue() );
 
+        final var invitationThirtyOne = new InvitationDao();
+        invitationThirtyOne.setInvitedBy("111");
+        invitationThirtyOne.setInvitedAt( now.plusDays(56) );
+
+        final var associationThirtyOne = new AssociationDao();
+        associationThirtyOne.setCompanyNumber("x777777");
+        associationThirtyOne.setUserId("99999");
+        associationThirtyOne.setUserEmail("scrooge.mcduck@disney.land");
+        associationThirtyOne.setStatus(StatusEnum.REMOVED.getValue());
+        associationThirtyOne.setId("31");
+        associationThirtyOne.setApprovedAt( now.plusDays(53) );
+        associationThirtyOne.setRemovedAt( now.plusDays(54) );
+        associationThirtyOne.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationThirtyOne.setApprovalExpiryAt( now.plusDays(55) );
+        associationThirtyOne.setInvitations( List.of( invitationThirtyOne ) );
+        associationThirtyOne.setEtag("nn");
+
+        final var associationTest = new AssociationDao();
+        associationTest.setId("1111");
+        associationTest.setCompanyNumber("123455");
+        associationTest.setUserId("5555");
+        associationTest.setStatus(StatusEnum.CONFIRMED.getValue());
+        associationTest.setApprovalRoute(ApprovalRouteEnum.AUTH_CODE.getValue());
+        // associationTest.setUserEmail("abc@abc.com");
+        associationTest.setApprovalExpiryAt(LocalDateTime.now().plusDays(10));
+        associationTest.setInvitations(new ArrayList<>());
+        associationTest.setEtag("OCRS7");
+
+        final var invitationTest = new InvitationDao();
+        invitationTest.setInvitedBy("123456");
+        invitationTest.setInvitedAt(LocalDateTime.now().plusDays(10));
+        invitationDaos.add(invitationTest);
+        associationTest.setInvitations(invitationDaos);
+
+        final var associationTestTwo = new AssociationDao();
+        associationTestTwo.setId("2222");
+        associationTestTwo.setCompanyNumber("123456");
+        //  associationTwo.setUserId("666");
+        associationTestTwo.setStatus(StatusEnum.CONFIRMED.getValue());
+        associationTestTwo.setApprovalRoute(ApprovalRouteEnum.AUTH_CODE.getValue());
+        associationTestTwo.setUserEmail("abcd@abc.com");
+        associationTestTwo.setApprovalExpiryAt(LocalDateTime.now().plusDays(10));
+        associationTestTwo.setInvitations(new ArrayList<>());
+        associationTestTwo.setEtag("OCRS7");
+
+        final var invitationTestTwo = new InvitationDao();
+        invitationTestTwo.setInvitedBy("123456");
+        invitationTestTwo.setInvitedAt(LocalDateTime.now().plusDays(10));
+        invitationDaos.add(invitationTestTwo);
+        associationTestTwo.setInvitations(invitationDaos);
+
+        final var invitationSeventeen = new InvitationDao();
+        invitationSeventeen.setInvitedBy("111");
+        invitationSeventeen.setInvitedAt( now.minusDays(68) );
+
+        final var associationSeventeen = new AssociationDao();
+        associationSeventeen.setCompanyNumber("222222P");
+        associationSeventeen.setUserId("8888");
+        associationSeventeen.setUserEmail("mr.blobby@nightmare.com");
+        associationSeventeen.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationSeventeen.setId("17");
+        associationSeventeen.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationSeventeen.setApprovalExpiryAt( now.plusDays(67) );
+        associationSeventeen.setInvitations( List.of( invitationSeventeen ) );
+        associationSeventeen.setEtag("q");
+
+        final var invitationEighteenOldest = new InvitationDao();
+        invitationEighteenOldest.setInvitedBy("666");
+        invitationEighteenOldest.setInvitedAt(now.minusDays(9));
+
+        final var invitationEighteenMedian = new InvitationDao();
+        invitationEighteenMedian.setInvitedBy("333");
+        invitationEighteenMedian.setInvitedAt(now.minusDays(6));
+
+        final var invitationEighteenNewest = new InvitationDao();
+        invitationEighteenNewest.setInvitedBy("444");
+        invitationEighteenNewest.setInvitedAt(now.minusDays(4));
+
+        final var associationEighteen = new AssociationDao();
+        associationEighteen.setCompanyNumber("333333P");
+        associationEighteen.setUserId("99999");
+        associationEighteen.setUserEmail("scrooge.mcduck1@disney.land");
+        associationEighteen.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationEighteen.setId("18");
+        associationEighteen.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationEighteen.setApprovalExpiryAt(now.plusDays(10));
+        associationEighteen.setInvitations( List.of( invitationEighteenMedian, invitationEighteenOldest, invitationEighteenNewest ) );
+        associationEighteen.setEtag( "aa" );
+
+        final var invitationNineteenOldest = new InvitationDao();
+        invitationNineteenOldest.setInvitedBy("111");
+        invitationNineteenOldest.setInvitedAt( now.minusDays(3) );
+
+        final var invitationNineteenMedian = new InvitationDao();
+        invitationNineteenMedian.setInvitedBy("222");
+        invitationNineteenMedian.setInvitedAt( now.minusDays(2) );
+
+        final var invitationNineteenNewest = new InvitationDao();
+        invitationNineteenNewest.setInvitedBy("444");
+        invitationNineteenNewest.setInvitedAt( now.minusDays(1) );
+
+        final var associationNineteen = new AssociationDao();
+        associationNineteen.setCompanyNumber("444444P");
+        associationNineteen.setUserId("99999");
+        associationNineteen.setUserEmail("scrooge.mcduck1@disney.land");
+        associationNineteen.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationNineteen.setId("19");
+        associationNineteen.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationNineteen.setApprovalExpiryAt( now.plusDays(20) );
+        associationNineteen.setInvitations( List.of( invitationNineteenOldest, invitationNineteenMedian, invitationNineteenNewest ) );
+        associationNineteen.setEtag("bb");
+
+        final var invitationTwenty = new InvitationDao();
+        invitationTwenty.setInvitedBy("666");
+        invitationTwenty.setInvitedAt( now.minusDays(12) );
+
+        final var associationTwenty = new AssociationDao();
+        associationTwenty.setCompanyNumber("555555P");
+        associationTwenty.setUserId("99999");
+        associationTwenty.setUserEmail("scrooge.mcduck1@disney.land");
+        associationTwenty.setStatus(StatusEnum.CONFIRMED.getValue());
+        associationTwenty.setId("20");
+        associationTwenty.setApprovedAt( now.plusDays(9) );
+        associationTwenty.setRemovedAt( now.plusDays(10) );
+        associationTwenty.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationTwenty.setApprovalExpiryAt( now.plusDays(11) );
+        associationTwenty.setInvitations( List.of( invitationTwenty ) );
+        associationTwenty.setEtag("cc");
+
+        final var invitationTwentyOne = new InvitationDao();
+        invitationTwentyOne.setInvitedBy("666");
+        invitationTwentyOne.setInvitedAt( now.minusDays(16) );
+
+        final var associationTwentyOne = new AssociationDao();
+        associationTwentyOne.setCompanyNumber("666666P");
+        associationTwentyOne.setUserId("99999");
+        associationTwentyOne.setUserEmail("scrooge.mcduck1@disney.land");
+        associationTwentyOne.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationTwentyOne.setId("21");
+        associationTwentyOne.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationTwentyOne.setApprovalExpiryAt( now.minusDays(15) );
+        associationTwentyOne.setInvitations( List.of( invitationTwentyOne ) );
+        associationTwentyOne.setEtag("dd");
+
+
         associationDaos = associationsRepository.saveAll( List.of(
                 associationOne, associationTwo, associationThree, associationFour,
                 associationFive, associationSix, associationSeven, associationEight,
-                associationNine, associationTen, associationEleven ) );
+                associationNine, associationTen, associationEleven, associationThirtyOne, associationTest, associationTestTwo,
+                associationSeventeen, associationEighteen, associationNineteen, associationTwenty, associationTwentyOne) );
 
     }
 
@@ -211,18 +367,18 @@ class AssociationsRepositoryTest {
 
     @Test
     void updateEtagWithNullThrowsConstraintViolationException() {
+        AssociationDao associationDao = new AssociationDao();
+        associationDao.setEtag(null);
         assertThrows(ConstraintViolationException.class, () -> {
-            AssociationDao associationDao = new AssociationDao();
-            associationDao.setEtag(null);
             associationsRepository.save(associationDao);
         });
     }
 
     @Test
     void updateApprovalRouteWithNullThrowsConstraintViolationException() {
+        AssociationDao associationDao = new AssociationDao();
+        associationDao.setApprovalRoute(null);
         assertThrows(ConstraintViolationException.class, () -> {
-            AssociationDao associationDao = new AssociationDao();
-            associationDao.setApprovalRoute(null);
             associationsRepository.save(associationDao);
         });
     }
@@ -301,53 +457,54 @@ class AssociationsRepositoryTest {
 
     @Test
     void getAssociationsForCompanyNumberAndStatusConfirmedAndCompanyNumberLikeShouldReturnAAssociation() {
-        Assertions.assertEquals(1, associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("777", Collections.singletonList("confirmed"),"10",Pageable.ofSize(1)).getTotalElements());
-        Assertions.assertEquals(1, associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("777", Collections.singletonList("confirmed"),"",Pageable.ofSize(1)).getTotalElements());
+        Assertions.assertEquals(1, associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("777", " ", Collections.singletonList("confirmed"),"10",Pageable.ofSize(1)).getTotalElements());
+        Assertions.assertEquals(1, associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("777", " ", Collections.singletonList("confirmed"),"",Pageable.ofSize(1)).getTotalElements());
+        Assertions.assertEquals(1, associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike(" ", "abcd@abc.com", Collections.singletonList("confirmed"),"",Pageable.ofSize(1)).getTotalElements());
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeWithNullOrNonexistentOrMalformedUserIdOrNullOrEmptyOrMalformedStatusReturnsEmptyPage(){
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike(null, List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("9191", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("$$$$", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", null,"",PageRequest.of(0, 5) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(),"",PageRequest.of(0, 5) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of("complicated"),"",PageRequest.of(0, 5) ).isEmpty() );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeWithNonexistentOrMalformedUserIdOrUserEmailOrEmptyOrMalformedStatusReturnsEmptyPage(){
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("1234", "**@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("1234","$$$", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("9191", "abcde@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("$$$$","abcde@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(0, 5) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("111","abcde@abc.com", List.of(),"",PageRequest.of(0, 5) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("111","abcde@abc.com", List.of("complicated"),"",PageRequest.of(0, 5) ).isEmpty() );
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeImplementsPaginationCorrectly(){
-         final var page = associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),"",PageRequest.of(1, 1) );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeImplementsPaginationCorrectly(){
+         final var page = associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"12345",PageRequest.of(1, 1) );
          final var ids = page.getContent().stream().map(AssociationDao::getCompanyNumber).toList();
-         Assertions.assertTrue( ids.contains( "222222" ) );
+         Assertions.assertTrue( ids.contains( "123456" ) );
          Assertions.assertEquals( 1, ids.size() );
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeWithNullPageableReturnsAllAssociations(){
-        final var page = associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),"",null );
-        final var ids = page.getContent().stream().map(AssociationDao::getCompanyNumber).toList();
-        Assertions.assertTrue( ids.containsAll( List.of( "111111", "222222" ) ) );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeWithNullPageableReturnsAllAssociations(){
+        final var page1 = associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com" ,List.of(StatusEnum.CONFIRMED.getValue() ),"",null );
+        final var ids = page1.getContent().stream().map(AssociationDao::getCompanyNumber).toList();
+        Assertions.assertTrue( ids.containsAll( List.of( "123455", "123456" ) ) );
         Assertions.assertEquals( 2, ids.size() );
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeFiltersBasedOnCompanyNumber(){
-        final var page = associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),"222222",PageRequest.of(0, 15) );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeFiltersBasedOnCompanyNumber(){
+        final var page = associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"123456",PageRequest.of(0, 15) );
         final var ids = page.getContent().stream().map(AssociationDao::getCompanyNumber).toList();
-        Assertions.assertTrue( ids.contains( "222222" ) );
+        Assertions.assertTrue( ids.contains( "123456" ) );
         Assertions.assertEquals( 1, ids.size() );
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeWithNullCompanyNumberThrowsIllegalArgumentException(){
-        Assertions.assertThrows( IllegalArgumentException.class, () -> associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),null,PageRequest.of(0, 15) ) );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeWithNullCompanyNumberThrowsUncategorizedMongoDbException(){
+        Assertions.assertThrows( UncategorizedMongoDbException.class, () -> associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),null ,PageRequest.of(0, 15) ) );
     }
 
     @Test
-    void findAllByUserIdAndStatusIsInAndCompanyNumberLikeWithMalformedOrNonexistentCompanyNumberReturnsEmptyPage(){
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),"$$$$$$",PageRequest.of(0, 15) ).isEmpty() );
-        Assertions.assertTrue( associationsRepository.findAllByUserIdAndStatusIsInAndCompanyNumberLike("111", List.of(StatusEnum.CONFIRMED.getValue() ),"abdef",PageRequest.of(0, 15) ).isEmpty() );
+    void findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLikeWithMalformedOrNonexistentCompanyNumberReturnsEmptyPage(){
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"$556",PageRequest.of(0, 15) ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.findAllByUserIdOrUserEmailAndStatusIsInAndCompanyNumberLike("5555","abcd@abc.com", List.of(StatusEnum.CONFIRMED.getValue() ),"abdef",PageRequest.of(0, 15) ).isEmpty() );
     }
 
     @Test
@@ -427,19 +584,27 @@ class AssociationsRepositoryTest {
         Assertions.assertTrue( secondPageContent.containsAll( List.of( "888", "101010" ) ) );
     }
 
-    @Test
-    void associationExistsWithNullOrMalformedOrNonExistentCompanyNumberOrUserReturnsFalse(){
-        Assertions.assertFalse( associationsRepository.associationExists( null, "111" ) );
-        Assertions.assertFalse( associationsRepository.associationExists( "$$$$$$", "111" ) );
-        Assertions.assertFalse( associationsRepository.associationExists( "919191", "111" ) );
-        Assertions.assertFalse( associationsRepository.associationExists( "111111", null ) );
-        Assertions.assertFalse( associationsRepository.associationExists( "111111", "$$$" ) );
-        Assertions.assertFalse( associationsRepository.associationExists( "111111", "9191" ) );
+    static Stream<Arguments> nullAndMalformedParameters() {
+        return Stream.of(
+                Arguments.of(null, "111"),
+                Arguments.of("$$$$$$", "111"),
+                Arguments.of("919191", "111"),
+                Arguments.of("111111", null),
+                Arguments.of("111111", "$$$"),
+                Arguments.of("111111", "9191")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("nullAndMalformedParameters")
+    void associationExistsWithStatusesWithNullOrMalformedOrNonExistentCompanyNumberOrUserReturnsFalse(String companyNumber, String userId) {
+        final List<String> statuses = Arrays.stream(StatusEnum.values()).map(StatusEnum::toString).toList();
+        Assertions.assertFalse(associationsRepository.associationExistsWithStatuses(companyNumber, userId, statuses));
     }
 
     @Test
-    void associationExistsWithExistingAssociationReturnsTrue(){
-        Assertions.assertTrue( associationsRepository.associationExists( "111111", "111" ) );
+    void associationExistsWithExistingConfirmedAssociationReturnsTrue(){
+        Assertions.assertTrue( associationsRepository.associationExistsWithStatuses( "111111", "111", List.of(StatusEnum.CONFIRMED.getValue()) ) );
     }
 
     @Test
@@ -705,6 +870,73 @@ class AssociationsRepositoryTest {
         final var associationOne = createMinimalistAssociationForCompositeKeyTests( null, "madonna@singer.com", "K000001" );
         final var associationTwo = createMinimalistAssociationForCompositeKeyTests( null, "madonna@singer.com", "K000002" );
         Assertions.assertDoesNotThrow( () -> associationsRepository.insert(List.of(associationOne, associationTwo)) );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserEmailWithNullOrMalformedOrNonexistentCompanyNumberReturnsNothing(){
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( null, "abc@abc.com" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( "$$$$$$", "abc@abc.com" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( "919191", "abc@abc.com" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserEmailWithMalformedOrNonexistentUserEmailReturnsNothing(){
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( "12345", "$$$$$$" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( "12345", "the.void@space.com" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserEmailRetrievesAssociation(){
+        Assertions.assertEquals( "31", associationsRepository.fetchAssociationForCompanyNumberAndUserEmail( "x777777", "scrooge.mcduck@disney.land" ).get().getId() ); ;
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdWithNullOrMalformedOrNonexistentCompanyNumberReturnsNothing(){
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserId( null, "99999" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserId( "$$$$$$", "99999" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserId( "919191", "99999" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdWithMalformedOrNonexistentUserIdReturnsNothing(){
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserId( "12345", "$$$$$$" ).isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationForCompanyNumberAndUserId( "12345", "919191" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdRetrievesAssociation(){
+        Assertions.assertEquals( "31", associationsRepository.fetchAssociationForCompanyNumberAndUserId( "x777777", "99999" ).get().getId() ); ;
+    }
+
+    @Test
+    void fetchAssociationsWithActiveInvitationsWithNullOrMalformedOrNonExistentUserIdOrEmailOrNullTimestampReturnsEmptyStream(){
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( null, null, LocalDateTime.now() ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( "$$$", null,LocalDateTime.now() ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( "9191", null,LocalDateTime.now() ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( "99999", null,null ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( null, "$$$",LocalDateTime.now() ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( null, "ronald@mcdonalds.com",LocalDateTime.now() ).toList().isEmpty() );
+        Assertions.assertTrue( associationsRepository.fetchAssociationsWithActiveInvitations( null, "ronald@mcdonalds.com",null ).toList().isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationsWithActiveInvitationsBasedOnUserIdAppliesFiltersCorrectly(){
+        final var associationIds = associationsRepository.fetchAssociationsWithActiveInvitations( "99999", null, LocalDateTime.now() )
+                .map( AssociationDao::getId )
+                .toList();
+
+        Assertions.assertEquals( 2, associationIds.size() );
+        Assertions.assertTrue( associationIds.containsAll( List.of( "18", "19" ) ) );
+    }
+    
+    @Test
+    void fetchAssociationsWithActiveInvitationsBasedOnUserEmailAppliesFiltersCorrectly(){
+        final var associationIds = associationsRepository.fetchAssociationsWithActiveInvitations( null, "scrooge.mcduck1@disney.land", LocalDateTime.now() )
+                .map( AssociationDao::getId )
+                .toList();
+
+        Assertions.assertEquals( 2, associationIds.size() );
+        Assertions.assertTrue( associationIds.containsAll( List.of( "18", "19" ) ) );
     }
 
     @AfterEach

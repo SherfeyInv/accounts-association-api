@@ -1,12 +1,7 @@
 package uk.gov.companieshouse.accounts.association.rest;
 
-import static org.mockito.ArgumentMatchers.any;
-
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpResponseException.Builder;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -15,7 +10,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-
 import uk.gov.companieshouse.accounts.association.utils.ApiClientUtil;
 import uk.gov.companieshouse.api.InternalApiClient;
 import uk.gov.companieshouse.api.accounts.user.model.User;
@@ -26,6 +20,12 @@ import uk.gov.companieshouse.api.handler.accountsuser.request.PrivateAccountsUse
 import uk.gov.companieshouse.api.handler.accountsuser.request.PrivateAccountsUserUserGet;
 import uk.gov.companieshouse.api.handler.exception.URIValidationException;
 import uk.gov.companieshouse.api.model.ApiResponse;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import static org.mockito.ArgumentMatchers.any;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit-test")
@@ -136,6 +136,45 @@ import uk.gov.companieshouse.api.model.ApiResponse;
         Mockito.doThrow( new ApiErrorResponseException( new Builder( 404, "Not Found", new HttpHeaders() ) ) ).when( privateAccountsUserUserGet ).execute();
 
         Assertions.assertThrows( ApiErrorResponseException.class, () -> accountsUserEndpoint.getUserDetails( "666" ) );
+    }
+
+    @Test
+    void createGetUserDetailsRequestWithNullInputThrowsNullPointerException(){
+        Assertions.assertThrows( NullPointerException.class, () -> accountsUserEndpoint.createGetUserDetailsRequest( null ).execute() );
+    }
+
+    @Test
+    void createGetUserDetailsRequestWithMalformedInputReturnsBadRequest() throws Exception {
+        Mockito.doReturn( internalApiClient ).when( apiClientService ).getInternalApiClient(any());
+        Mockito.doReturn( privateAccountsUserResourceHandler ).when( internalApiClient ).privateAccountsUserResourceHandler();
+        Mockito.doReturn( privateAccountsUserUserGet ).when( privateAccountsUserResourceHandler ).getUserDetails( any() );
+        Mockito.doThrow( new ApiErrorResponseException( new Builder( 400, "Bad request", new HttpHeaders() ) ) ).when( privateAccountsUserUserGet ).execute();
+
+        Assertions.assertThrows( ApiErrorResponseException.class, () -> accountsUserEndpoint.createGetUserDetailsRequest( "$" ).execute() );
+    }
+
+    @Test
+    void createGetUserDetailsRequestFetchesUser() throws Exception {
+        Mockito.doReturn( internalApiClient ).when( apiClientService ).getInternalApiClient(any());
+        Mockito.doReturn( privateAccountsUserResourceHandler ).when( internalApiClient ).privateAccountsUserResourceHandler();
+        Mockito.doReturn( privateAccountsUserUserGet ).when( privateAccountsUserResourceHandler ).getUserDetails( any() );
+
+        final var intendedResponse = new ApiResponse<>( 200, Map.of(), new User().userId( "111" ) );
+        Mockito.doReturn( intendedResponse ).when( privateAccountsUserUserGet ).execute();
+        final var response = accountsUserEndpoint.createGetUserDetailsRequest( "111" ).execute();
+
+        Assertions.assertEquals( 200, response.getStatusCode() );
+        Assertions.assertEquals( "111", response.getData().getUserId() );
+    }
+
+    @Test
+    void createGetUserDetailsRequestWithNonexistentUserReturnsNotFound() throws Exception {
+        Mockito.doReturn( internalApiClient ).when( apiClientService ).getInternalApiClient(any());
+        Mockito.doReturn( privateAccountsUserResourceHandler ).when( internalApiClient ).privateAccountsUserResourceHandler();
+        Mockito.doReturn( privateAccountsUserUserGet ).when( privateAccountsUserResourceHandler ).getUserDetails( any() );
+        Mockito.doThrow( new ApiErrorResponseException( new Builder( 404, "Not Found", new HttpHeaders() ) ) ).when( privateAccountsUserUserGet ).execute();
+
+        Assertions.assertThrows( ApiErrorResponseException.class, () -> accountsUserEndpoint.createGetUserDetailsRequest( "666" ).execute() );
     }
 
 }

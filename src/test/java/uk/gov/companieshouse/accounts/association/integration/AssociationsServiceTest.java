@@ -1,15 +1,12 @@
 package uk.gov.companieshouse.accounts.association.integration;
 
-import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentMatcher;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,12 +15,14 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.data.domain.Page;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import uk.gov.companieshouse.accounts.association.exceptions.InternalServerErrorRuntimeException;
 import uk.gov.companieshouse.accounts.association.mapper.AssociationsListCompanyMapper;
 import uk.gov.companieshouse.accounts.association.mapper.AssociationsListUserMapper;
+import uk.gov.companieshouse.accounts.association.mapper.InvitationsMapper;
 import uk.gov.companieshouse.accounts.association.models.AssociationDao;
 import uk.gov.companieshouse.accounts.association.models.InvitationDao;
 import uk.gov.companieshouse.accounts.association.repositories.AssociationsRepository;
@@ -32,13 +31,22 @@ import uk.gov.companieshouse.accounts.association.utils.StaticPropertyUtil;
 import uk.gov.companieshouse.api.InternalApiClient;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.ApprovalRouteEnum;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.StatusEnum;
+import uk.gov.companieshouse.api.accounts.associations.model.Invitation;
 import uk.gov.companieshouse.api.accounts.associations.model.RequestBodyPut;
 import uk.gov.companieshouse.api.accounts.user.model.User;
 import uk.gov.companieshouse.api.company.CompanyDetails;
 import uk.gov.companieshouse.api.sdk.ApiClientService;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Assertions;
-import org.mockito.Mockito;
+import uk.gov.companieshouse.email_producer.EmailProducer;
+import uk.gov.companieshouse.email_producer.factory.KafkaProducerFactory;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 
 @SpringBootTest
 @ExtendWith(MockitoExtension.class)
@@ -63,10 +71,19 @@ public class AssociationsServiceTest {
     InternalApiClient internalApiClient;
 
     @MockBean
+    EmailProducer emailProducer;
+
+    @MockBean
+    KafkaProducerFactory kafkaProducerFactory;
+
+    @MockBean
     AssociationsListCompanyMapper associationsListCompanyMapper;
 
     @MockBean
     AssociationsListUserMapper associationsListUserMapper;
+
+    @MockBean
+    InvitationsMapper invitationsMapper;
 
     @Autowired
     private AssociationsService associationsService;
@@ -74,9 +91,10 @@ public class AssociationsServiceTest {
     @MockBean
     StaticPropertyUtil staticPropertyUtil;
 
+    final LocalDateTime now = LocalDateTime.now();
+
     @BeforeEach
     public void setup() {
-        final var now = LocalDateTime.now();
 
         final var invitationOne = new InvitationDao();
         invitationOne.setInvitedBy("666");
@@ -625,13 +643,59 @@ public class AssociationsServiceTest {
         associationThirtyThree.setInvitations( List.of( invitationThirtyThree ) );
         associationThirtyThree.setEtag("pp");
 
+        final var invitationThirtyFourOldest = new InvitationDao();
+        invitationThirtyFourOldest.setInvitedBy("666");
+        invitationThirtyFourOldest.setInvitedAt(now.minusDays(9));
+
+        final var invitationThirtyFourMedian = new InvitationDao();
+        invitationThirtyFourMedian.setInvitedBy("333");
+        invitationThirtyFourMedian.setInvitedAt(now.minusDays(6));
+
+        final var invitationThirtyFourNewest = new InvitationDao();
+        invitationThirtyFourNewest.setInvitedBy("444");
+        invitationThirtyFourNewest.setInvitedAt(now.minusDays(4));
+
+        final var associationThirtyFour = new AssociationDao();
+        associationThirtyFour.setCompanyNumber("333333P");
+        associationThirtyFour.setUserId("99999");
+        associationThirtyFour.setUserEmail("scrooge.mcduck1@disney.land");
+        associationThirtyFour.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationThirtyFour.setId("34");
+        associationThirtyFour.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationThirtyFour.setApprovalExpiryAt(now.plusDays(11));
+        associationThirtyFour.setInvitations( List.of( invitationThirtyFourMedian, invitationThirtyFourOldest, invitationThirtyFourNewest ) );
+        associationThirtyFour.setEtag( "aa" );
+
+        final var invitationThirtyFiveOldest = new InvitationDao();
+        invitationThirtyFiveOldest.setInvitedBy("111");
+        invitationThirtyFiveOldest.setInvitedAt( now.minusDays(3) );
+
+        final var invitationThirtyFiveMedian = new InvitationDao();
+        invitationThirtyFiveMedian.setInvitedBy("222");
+        invitationThirtyFiveMedian.setInvitedAt( now.minusDays(2) );
+
+        final var invitationThirtyFiveNewest = new InvitationDao();
+        invitationThirtyFiveNewest.setInvitedBy("444");
+        invitationThirtyFiveNewest.setInvitedAt( now.minusDays(1) );
+
+        final var associationThirtyFive = new AssociationDao();
+        associationThirtyFive.setCompanyNumber("444444P");
+        associationThirtyFive.setUserId("99999");
+        associationThirtyFive.setUserEmail("scrooge.mcduck1@disney.land");
+        associationThirtyFive.setStatus(StatusEnum.AWAITING_APPROVAL.getValue());
+        associationThirtyFive.setId("35");
+        associationThirtyFive.setApprovalRoute(ApprovalRouteEnum.INVITATION.getValue());
+        associationThirtyFive.setApprovalExpiryAt( now.plusDays(8) );
+        associationThirtyFive.setInvitations( List.of( invitationThirtyFiveOldest, invitationThirtyFiveMedian, invitationThirtyFiveNewest ) );
+        associationThirtyFive.setEtag("bb");
+
         associationsRepository.insert( List.of( associationOne, associationTwo, associationThree, associationFour,
                 associationFive, associationSix, associationSeven, associationEight, associationNine, associationTen,
                 associationEleven, associationTwelve, associationThirteen, associationFourteen, associationFifteen,
                 associationSixteen, associationEighteen, associationNineteen, associationTwenty, associationTwentyOne,
                 associationTwentyTwo, associationTwentyThree, associationTwentyFour, associationTwentyFive, associationTwentySix,
                 associationTwentySeven, associationTwentyEight, associationTwentyNine, associationThirty, associationThirtyOne,
-                associationThirtyTwo, associationThirtyThree ) );
+                associationThirtyTwo, associationThirtyThree, associationThirtyFour, associationThirtyFive ) );
     }
 
     @Test
@@ -639,8 +703,8 @@ public class AssociationsServiceTest {
         final var companyDetails =
                 new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
 
-        Assertions.assertNull( associationsService.fetchAssociatedUsers( null, companyDetails,true, 15, 0, null ) );
-        Assertions.assertNull( associationsService.fetchAssociatedUsers( "111111", null,true, 15, 0, null ) );
+        Assertions.assertNull( associationsService.fetchAssociatedUsers( null, companyDetails,true, 15, 0 ) );
+        Assertions.assertNull( associationsService.fetchAssociatedUsers( "111111", null,true, 15, 0 ) );
     }
 
     private ArgumentMatcher<Page<AssociationDao>> associationsPageMatches( int totalElements, int totalPages, int numElementsOnPage, List<String> expectedAssociationIds ){
@@ -663,7 +727,7 @@ public class AssociationsServiceTest {
         final var companyDetails =
                 new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
 
-        associationsService.fetchAssociatedUsers( "111111", companyDetails, true, 20, 0, null );
+        associationsService.fetchAssociatedUsers( "111111", companyDetails, true, 20, 0 );
         final var expectedAssociationIds = List.of( "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" );
         Mockito.verify( associationsListCompanyMapper ).daoToDto( argThat( associationsPageMatches(16, 1, 16, expectedAssociationIds ) ), eq( companyDetails ) );
     }
@@ -673,7 +737,7 @@ public class AssociationsServiceTest {
         final var companyDetails =
                 new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
 
-        associationsService.fetchAssociatedUsers( "111111", companyDetails, false, 20, 0, null );
+        associationsService.fetchAssociatedUsers( "111111", companyDetails, false, 20, 0 );
         final var expectedAssociationIds = List.of( "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13" );
         Mockito.verify( associationsListCompanyMapper ).daoToDto( argThat( associationsPageMatches(13, 1, 13, expectedAssociationIds ) ), eq( companyDetails ) );
     }
@@ -683,37 +747,10 @@ public class AssociationsServiceTest {
         final var companyDetails =
                 new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
 
-        associationsService.fetchAssociatedUsers("111111", companyDetails, true, 15, 1, null);
+        associationsService.fetchAssociatedUsers("111111", companyDetails, true, 15, 1);
         Mockito.verify(associationsListCompanyMapper).daoToDto(argThat(associationsPageMatches(16, 2, 1, List.of("16"))), eq(companyDetails));
     }
 
-    @Test
-    void fetchAssociatedUsersWithUserEmailRetrievesAssociation(){
-        final var companyDetails =
-                new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
-
-        associationsService.fetchAssociatedUsers("111111", companyDetails, true, 15, 0, "bruce.wayne@gotham.city" );
-
-        Mockito.verify(associationsListCompanyMapper).daoToDto(argThat(associationsPageMatches(1, 1, 1, List.of("1"))), eq(companyDetails));
-    }
-
-    @Test
-    void fetchAssociatedUsersWithMalformedUserEmailReturnsEmptyPage(){
-        final var companyDetails =
-                new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
-
-        associationsService.fetchAssociatedUsers("111111", companyDetails, true, 15, 0, "$$$" );
-        Mockito.verify(associationsListCompanyMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, List.of())), eq(companyDetails));
-    }
-
-    @Test
-    void fetchAssociatedUsersWithNonexistentUserEmailReturnsEmptyPage(){
-        final var companyDetails =
-                new CompanyDetails().companyNumber("111111").companyName("Wayne Enterprises");
-
-        associationsService.fetchAssociatedUsers("111111", companyDetails, true, 15, 0, "the.void@space.com" );
-        Mockito.verify(associationsListCompanyMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, List.of())), eq(companyDetails));
-    }
 
     @Test
     void fetchAssociationsForUserStatusAndCompanyWithNullInputsThrowsNullPointerException(){
@@ -771,7 +808,7 @@ public class AssociationsServiceTest {
     @Test
     void fetchAssociationsForUserStatusAndCompanyWithEmptyStatusDefaultsToConfirmedStatus(){
         final var user = new User().userId("9999").email("scrooge.mcduck@disney.land").displayName( "Scrooge McDuck" );
-        associationsService.fetchAssociationsForUserStatusAndCompany( user, List.of(), 0, 15, null );
+        associationsService.fetchAssociationsForUserStatusAndCompany( user, Collections.emptyList(), 0, 15, null );
         Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(5, 1, 5, List.of("18", "19", "20", "21", "22"))), eq(user));
     }
 
@@ -779,21 +816,28 @@ public class AssociationsServiceTest {
     void fetchAssociationsForUserStatusAndCompanyWithInvalidStatusReturnsEmptyPage() {
         final var user = new User().userId("9999").email("scrooge.mcduck@disney.land").displayName( "Scrooge McDuck" );
         associationsService.fetchAssociationsForUserStatusAndCompany( user, List.of( "complicated" ), 0, 15, null );
-        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, List.of())), eq(user));
+        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, Collections.emptyList())), eq(user));
     }
 
     @Test
     void fetchAssociationsForUserStatusAndCompanyWithNonexistentOrInvalidCompanyNumberReturnsEmptyPage() {
         final var user = new User().userId("9999").email("scrooge.mcduck@disney.land").displayName( "Scrooge McDuck" );
-        associationsService.fetchAssociationsForUserStatusAndCompany( user, List.of(), 0, 15, "$$$$$$" );
-        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, List.of())), eq(user));
+        associationsService.fetchAssociationsForUserStatusAndCompany( user, Collections.emptyList(), 0, 15, "$$1234" );
+        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, Collections.emptyList())), eq(user));
     }
 
     @Test
     void fetchAssociationsForUserStatusAndCompanyWithNonexistentUserIdReturnsEmptyPage() {
         final var user = new User().userId("9191").email("scrooge.mcduck@disney.land").displayName( "Scrooge McDuck" );
-        associationsService.fetchAssociationsForUserStatusAndCompany( user, List.of(), 0, 15, null );
-        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, List.of())), eq(user));
+        associationsService.fetchAssociationsForUserStatusAndCompany( user, Collections.emptyList(), 0, 15, "1234" );
+        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, Collections.emptyList())), eq(user));
+    }
+
+    @Test
+    void fetchAssociationsForUserStatusAndCompanyWithNonexistentUserEmailReturnsEmptyPage() {
+        final var user = new User().userId("9999").email("xyz@disney.land").displayName( "Scrooge McDuck" );
+        associationsService.fetchAssociationsForUserStatusAndCompany( user, Collections.emptyList(), 0, 15, "1234" );
+        Mockito.verify(associationsListUserMapper).daoToDto(argThat(associationsPageMatches(0, 0, 0, Collections.emptyList())), eq(user));
     }
 
     @AfterEach
@@ -802,35 +846,138 @@ public class AssociationsServiceTest {
     }
 
     @Test
-    void associationExistsWithNullOrMalformedOrNonExistentCompanyNumberOrUserReturnsFalse(){
-        Assertions.assertFalse( associationsService.associationExists( null, "111" ) );
-        Assertions.assertFalse( associationsService.associationExists( "$$$$$$", "111" ) );
-        Assertions.assertFalse( associationsService.associationExists( "919191", "111" ) );
-        Assertions.assertFalse( associationsService.associationExists( "111111", null ) );
-        Assertions.assertFalse( associationsService.associationExists( "111111", "$$$" ) );
-        Assertions.assertFalse( associationsService.associationExists( "111111", "9191" ) );
+    void confirmedAssociationExistsWithNullOrMalformedOrNonExistentCompanyNumberOrUserReturnsFalse(){
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( null, "111" ) );
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( "$$$$$$", "111" ) );
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( "919191", "111" ) );
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( "111111", null ) );
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( "111111", "$$$" ) );
+        Assertions.assertFalse( associationsService.confirmedAssociationExists( "111111", "9191" ) );
     }
 
     @Test
-    void associationExistsWithExistingAssociationReturnsTrue(){
-        Assertions.assertTrue( associationsService.associationExists( "111111", "111" ) );
+    void associationExistsWithExistingConfirmedAssociationReturnsTrue(){
+        Assertions.assertTrue( associationsService.confirmedAssociationExists( "111111", "111" ) );
     }
 
     @Test
     void createAssociationWithNullInputsThrowsNullPointerException(){
-        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( null, "000", ApprovalRouteEnum.AUTH_CODE ) );
-        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( "000000", null, ApprovalRouteEnum.AUTH_CODE ) );
-        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( "000000", "000", null ) );
+        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( null, "000", "the.void@space.com", ApprovalRouteEnum.AUTH_CODE ,"111") );
+        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( "000000", null, null, ApprovalRouteEnum.AUTH_CODE ,"111") );
+        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( "000000", "000", "the.void@space.com", null ,"111") );
+        Assertions.assertThrows(NullPointerException.class, () -> associationsService.createAssociation( "000000", "000", "the.void@space.com", ApprovalRouteEnum.INVITATION ,null) );
     }
 
+    static Stream<Arguments> validUserIdAndValidEmail() {
+        return Stream.of(
+                Arguments.of("000000", "000", null, "111"),
+                Arguments.of("000000", null, "bruce.wayne@gotham.city", "111")
+        );
+    }
+
+
     @Test
-    void createAssociationSuccessfullyCreatesAssociation(){
-        final var association = associationsService.createAssociation( "000000", "000", ApprovalRouteEnum.AUTH_CODE );
+    void createAssociationWithUserIdAndAuthCodeSuccessfullyCreatesOrUpdateAssociation(){
+        final var association = associationsService.createAssociation( "000000", "000", null, ApprovalRouteEnum.AUTH_CODE, null);
         Assertions.assertEquals( "000000", association.getCompanyNumber() );
         Assertions.assertEquals( "000", association.getUserId() );
+        Assertions.assertNull( association.getUserEmail() );
         Assertions.assertEquals( StatusEnum.CONFIRMED.getValue(), association.getStatus() );
         Assertions.assertEquals( ApprovalRouteEnum.AUTH_CODE.getValue(), association.getApprovalRoute() );
         Assertions.assertNotNull( association.getEtag() );
+    }
+
+    @Test
+    void createAssociationWithUserIdAndInvitationSuccessfullyCreatesOrUpdateAssociation(){
+        final var association = associationsService.createAssociation( "000000", "000", null, ApprovalRouteEnum.INVITATION, "111");
+        final var invitation = association.getInvitations().getFirst();
+
+        Assertions.assertEquals( "000000", association.getCompanyNumber() );
+        Assertions.assertEquals( "000", association.getUserId() );
+        Assertions.assertNull( association.getUserEmail() );
+        Assertions.assertEquals( StatusEnum.AWAITING_APPROVAL.getValue(), association.getStatus() );
+        Assertions.assertEquals( ApprovalRouteEnum.INVITATION.getValue(), association.getApprovalRoute() );
+        Assertions.assertNotNull( association.getEtag() );
+        Assertions.assertNotNull( association.getApprovalExpiryAt() );
+        Assertions.assertNotNull( invitation.getInvitedAt() );
+        Assertions.assertEquals( "111", invitation.getInvitedBy() );
+    }
+
+    @Test
+    void createAssociationWithUserEmailAndAuthCodeSuccessfullyCreatesOrUpdateAssociation(){
+        final var association = associationsService.createAssociation( "000000", null, "bruce.wayne@gotham.city", ApprovalRouteEnum.AUTH_CODE, null);
+        Assertions.assertEquals( "000000", association.getCompanyNumber() );
+        Assertions.assertNull( association.getUserId() );
+        Assertions.assertEquals( "bruce.wayne@gotham.city", association.getUserEmail() );
+        Assertions.assertEquals( StatusEnum.CONFIRMED.getValue(), association.getStatus() );
+        Assertions.assertEquals( ApprovalRouteEnum.AUTH_CODE.getValue(), association.getApprovalRoute() );
+        Assertions.assertNotNull( association.getEtag() );
+    }
+
+    @Test
+    void createAssociationWithUserEmailAndInvitationSuccessfullyCreatesOrUpdateAssociation(){
+        final var association = associationsService.createAssociation( "000000", null, "bruce.wayne@gotham.city", ApprovalRouteEnum.INVITATION, "111");
+        final var invitation = association.getInvitations().getFirst();
+
+        Assertions.assertEquals( "000000", association.getCompanyNumber() );
+        Assertions.assertNull( association.getUserId() );
+        Assertions.assertEquals( "bruce.wayne@gotham.city", association.getUserEmail() );
+        Assertions.assertEquals( StatusEnum.AWAITING_APPROVAL.getValue(), association.getStatus() );
+        Assertions.assertEquals( ApprovalRouteEnum.INVITATION.getValue(), association.getApprovalRoute() );
+        Assertions.assertNotNull( association.getEtag() );
+        Assertions.assertNotNull( association.getApprovalExpiryAt() );
+        Assertions.assertNotNull( invitation.getInvitedAt() );
+        Assertions.assertEquals( "111", invitation.getInvitedBy() );
+    }
+
+    @Test
+    void sendNewInvitationWithNullInputsThrowsNullPointerException(){
+        Assertions.assertThrows( NullPointerException.class, () -> associationsService.sendNewInvitation( null, associationsRepository.findById("1").get() ) );
+        Assertions.assertThrows( NullPointerException.class, () -> associationsService.sendNewInvitation( "111", null ) );
+    }
+
+    @Test
+    void sendNewInvitationWithNonexistentAssociationCreatesNewAssociation(){
+        final var association = new AssociationDao();
+        association.setCompanyNumber( "000000" );
+        association.setUserId( null );
+        association.setUserEmail( "the.void@space.com" );
+        association.setApprovalRoute( ApprovalRouteEnum.INVITATION.getValue() );
+
+        final var updatedAssociation = associationsService.sendNewInvitation( "111", association );
+        final var invitation = updatedAssociation.getInvitations().getFirst();
+
+        Assertions.assertEquals( "000000", association.getCompanyNumber() );
+        Assertions.assertNull( association.getUserId() );
+        Assertions.assertEquals( "the.void@space.com", association.getUserEmail() );
+        Assertions.assertEquals( ApprovalRouteEnum.INVITATION.getValue(), association.getApprovalRoute() );
+        Assertions.assertEquals( StatusEnum.AWAITING_APPROVAL.getValue(), association.getStatus() );
+        Assertions.assertNotNull( association.getEtag() );
+        Assertions.assertNotNull( association.getApprovalExpiryAt() );
+        Assertions.assertNotNull( invitation.getInvitedAt() );
+        Assertions.assertEquals( "111", invitation.getInvitedBy() );
+    }
+
+    @Test
+    void sendNewInvitationWithExistingAssociationCreatesNewInvitation(){
+        final var association = associationsRepository.findById( "1" ).get();
+
+        final var updatedAssociation = associationsService.sendNewInvitation( "222", association );
+        final var invitations = updatedAssociation.getInvitations();
+        final var firstInvitation = invitations.getFirst();
+        final var secondInvitation = invitations.getLast();
+
+        Assertions.assertEquals( "111111", association.getCompanyNumber() );
+        Assertions.assertEquals( "111", association.getUserId() );
+        Assertions.assertEquals( "bruce.wayne@gotham.city", association.getUserEmail() );
+        Assertions.assertEquals( ApprovalRouteEnum.AUTH_CODE.getValue(), association.getApprovalRoute() );
+        Assertions.assertEquals( StatusEnum.AWAITING_APPROVAL.getValue(), association.getStatus() );
+        Assertions.assertNotNull( association.getEtag() );
+        Assertions.assertNotNull( association.getApprovalExpiryAt() );
+        Assertions.assertNotNull( firstInvitation.getInvitedAt() );
+        Assertions.assertEquals( "666", firstInvitation.getInvitedBy() );
+        Assertions.assertNotNull( secondInvitation.getInvitedAt() );
+        Assertions.assertEquals( "222", secondInvitation.getInvitedBy() );
     }
 
     @Test
@@ -860,5 +1007,80 @@ public class AssociationsServiceTest {
         Assertions.assertEquals( oldAssociationData.getUserId(), newAssociationData.getUserId() );
     }
 
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdWithNullOrMalformedOrNonexistentCompanyNumberReturnsNothing(){
+        Assertions.assertTrue( associationsService.fetchAssociationForCompanyNumberAndUserId( null, "111" ).isEmpty() );
+        Assertions.assertTrue( associationsService.fetchAssociationForCompanyNumberAndUserId( "$$$$$$", "111" ).isEmpty() );
+        Assertions.assertTrue( associationsService.fetchAssociationForCompanyNumberAndUserId( "919191", "111" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdWithMalformedOrNonexistentUserIdReturnsNothing() {
+        Assertions.assertTrue( associationsService.fetchAssociationForCompanyNumberAndUserId( "111111", "$$$" ).isEmpty() );
+        Assertions.assertTrue( associationsService.fetchAssociationForCompanyNumberAndUserId( "111111", "9191" ).isEmpty() );
+    }
+
+    @Test
+    void fetchAssociationForCompanyNumberAndUserIdShouldFetchAssociation(){
+        Assertions.assertEquals( "1", associationsService.fetchAssociationForCompanyNumberAndUserId( "111111", "111" ).get().getId() );
+    }
+
+    @Test
+    void fetchActiveInvitationsWithNullOrMalformedOrNonexistentUserIdReturnsEmptyList(){
+        Assertions.assertEquals( Collections.emptyList(), associationsService.fetchActiveInvitations( new User(), 0, 1 ).getItems() );
+        Assertions.assertEquals( Collections.emptyList(), associationsService.fetchActiveInvitations( new User().userId("$$$"), 0, 1 ).getItems() );
+        Assertions.assertEquals( Collections.emptyList(), associationsService.fetchActiveInvitations( new User().userId("9191"), 0, 1 ).getItems() );
+    }
+
+    ArgumentMatcher<AssociationDao> associationIdMatches( String associationId ){
+        return associationDao -> associationId.equals( associationDao.getId() );
+    }
+
+    private String reduceTimestampResolution( String timestamp ){
+        return timestamp.substring( 0, timestamp.indexOf( ":" ) );
+    }
+
+    private String localDateTimeToNormalisedString( LocalDateTime localDateTime ){
+        final var timestamp = localDateTime.toString();
+        return reduceTimestampResolution( timestamp );
+    }
+
+    private Predicate<InvitationDao> invitationDaoMatches( String invitedBy, LocalDateTime invitedAt ){
+        return invitationDao ->
+                invitedBy.equals( invitationDao.getInvitedBy() ) &&
+                        localDateTimeToNormalisedString( invitedAt ).equals( localDateTimeToNormalisedString( invitationDao.getInvitedAt() ) );
+    }
+
+    ArgumentMatcher<AssociationDao> associationDaoMatches( String associationId, LocalDateTime expectedExpiry, String expectedInvitedBy, LocalDateTime expectedInvitedAt ){
+        return associationDao -> {
+            final var firstInvitationDao = associationDao.getInvitations().getFirst();
+            return associationId.equals( associationDao.getId() ) &&
+                    localDateTimeToNormalisedString( expectedExpiry ).equals( localDateTimeToNormalisedString( associationDao.getApprovalExpiryAt() ) ) &&
+                    invitationDaoMatches( expectedInvitedBy, expectedInvitedAt ).test( firstInvitationDao );
+        };
+    }
+
+    @Test
+    void fetchActiveInvitationsReturnsPaginatedResultsInCorrectOrderAndOnlyRetainsMostRecentInvitationPerAssociation(){
+
+        final var invitationThirtyFour = new Invitation();
+        invitationThirtyFour.setInvitedBy( "444" );
+        invitationThirtyFour.setInvitedAt( now.minusDays(4).toString() );
+        invitationThirtyFour.setAssociationId( "34" );
+        invitationThirtyFour.setIsActive( true );
+
+        final var invitationThirtyFive = new Invitation();
+        invitationThirtyFive.setInvitedBy( "444" );
+        invitationThirtyFive.setInvitedAt( now.minusDays(1).toString() );
+        invitationThirtyFive.setAssociationId( "35" );
+        invitationThirtyFive.setIsActive( true );
+
+        Mockito.doReturn( Stream.of( invitationThirtyFive ) ).when( invitationsMapper ).daoToDto( argThat( associationIdMatches( "34" ) ) );
+        Mockito.doReturn( Stream.of( invitationThirtyFive ) ).when( invitationsMapper ).daoToDto( argThat( associationIdMatches( "35" ) ) );
+
+        associationsService.fetchActiveInvitations( new User().userId("99999"), 1, 1 );
+
+        Mockito.verify(invitationsMapper).daoToDto(argThat(associationDaoMatches("35", now.plusDays(8), "444", now.minusDays(1))));
+    }
 
 }
