@@ -13,7 +13,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.MediaType;
@@ -31,9 +31,7 @@ import uk.gov.companieshouse.accounts.association.service.UsersService;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.ApprovalRouteEnum;
 import uk.gov.companieshouse.api.accounts.associations.model.Association.StatusEnum;
 import uk.gov.companieshouse.api.accounts.associations.model.InvitationsList;
-import uk.gov.companieshouse.api.handler.exception.URIValidationException;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -97,7 +95,7 @@ class UserCompanyInvitationsTest extends BaseMongoIntegration {
     private final ComparisonUtils comparisonUtils = new ComparisonUtils();
 
     @BeforeEach
-    public void setup() throws IOException, URIValidationException {
+    public void setup() {
         mockers = new Mockers(null, emailClient, companyService, usersService);
     }
 

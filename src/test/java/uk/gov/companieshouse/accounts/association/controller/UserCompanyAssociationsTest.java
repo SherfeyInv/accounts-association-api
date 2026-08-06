@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -42,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -480,39 +484,27 @@ class UserCompanyAssociationsTest {
         Assertions.assertNotNull( associationOne.getUnauthorisedAt() );
     }
 
-    @Test
-    void addAssociationWithoutRequestBodyReturnsBadRequest() throws Exception {
-        mockMvc.perform(post(ASSOCIATIONS)
-                        .header(ERIC_IDENTITY, "000")
-                        .header(X_REQUEST_ID, X_REQUEST_ID_VALUE)
-                        .header(ERIC_IDENTITY_TYPE, "key")
-                        .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isBadRequest());
+    private static Stream<Arguments> addAssociationWithInvalidRequestBodyReturnsBadRequestScenarios() {
+        return Stream.of(
+                Arguments.of( (String) null ),
+                Arguments.of( "{}" ),
+                Arguments.of( "{\"company_number\":\"$$$$$$\", \"user_id\":\"000\"}" )
+        );
     }
 
-    @Test
-    void addAssociationWithEmptyRequestBodyReturnsBadRequest() throws Exception {
-        mockMvc.perform(post(ASSOCIATIONS)
+    @ParameterizedTest
+    @MethodSource("addAssociationWithInvalidRequestBodyReturnsBadRequestScenarios")
+    void addAssociationWithInvalidRequestBodyReturnsBadRequest( final String body ) throws Exception {
+        var request = post(ASSOCIATIONS)
                         .header(ERIC_IDENTITY, "000")
                         .header(X_REQUEST_ID, X_REQUEST_ID_VALUE)
                         .header(ERIC_IDENTITY_TYPE, "key")
                         .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void addAssociationWithMalformedCompanyNumberReturnsBadRequest() throws Exception {
-        mockMvc.perform(post(ASSOCIATIONS)
-                        .header(ERIC_IDENTITY, "000")
-                        .header(X_REQUEST_ID, X_REQUEST_ID_VALUE)
-                        .header(ERIC_IDENTITY_TYPE, "key")
-                        .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"company_number\":\"$$$$$$\", \"user_id\":\"000\"}"))
-                .andExpect(status().isBadRequest());
+                        .contentType(MediaType.APPLICATION_JSON);
+        if ( body != null ) {
+            request = request.content( body );
+        }
+        mockMvc.perform( request ).andExpect( status().isBadRequest() );
     }
 
     @Test
@@ -701,7 +693,6 @@ class UserCompanyAssociationsTest {
     @Test
     void addAssociationCanBeAppliedToMigratedAssociation() throws Exception {
         final var originalAssociationDao = testDataManager.fetchAssociationDaos( "MKAssociation001" ).getFirst();
-        final var company = testDataManager.fetchCompanyDetailsDtos( "MKCOMP001" ).getFirst();
         final var updatedAssociation = testDataManager.fetchAssociationDaos( "MKAssociation001" ).getFirst()
                 .status( "confirmed" )
                 .previousStates( new ArrayList<>( List.of( new PreviousStatesDao().status( "migrated" ).changedBy( "MKUser001" ).changedAt( LocalDateTime.now() ) ) ) )

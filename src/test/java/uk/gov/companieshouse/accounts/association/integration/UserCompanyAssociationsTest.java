@@ -13,7 +13,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.MediaType;
@@ -448,22 +448,17 @@ class UserCompanyAssociationsTest extends BaseMongoIntegration {
                 .andExpect( status().isBadRequest() );
     }
 
-    @Test
-    void addAssociationWithEmptyBodyReturnsBadRequest() throws Exception {
-        mockers.mockUsersServiceFetchUserDetails( "9999" );
-
-        mockMvc.perform(post(ASSOCIATIONS)
-                        .header(ERIC_IDENTITY, "9999")
-                        .header(X_REQUEST_ID, X_REQUEST_ID_VALUE)
-                        .header(ERIC_IDENTITY_TYPE, "key")
-                        .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
-                        .contentType( MediaType.APPLICATION_JSON )
-                        .content( "{}" ) )
-                .andExpect( status().isBadRequest() );
+    private static Stream<Arguments> addAssociationWithInvalidRequestBodyReturnsBadRequestScenarios() {
+        return Stream.of(
+                Arguments.of( "{}" ),
+                Arguments.of( "{\"company_number\":\"$$$$$$\", \"user_id\":\"9999\"}" ),
+                Arguments.of( "{\"company_number\":\"333333\", \"user_id\":\"$$$$\"}" )
+        );
     }
 
-    @Test
-    void addAssociationWithMalformedCompanyNumberReturnsBadRequest() throws Exception {
+    @ParameterizedTest
+    @MethodSource("addAssociationWithInvalidRequestBodyReturnsBadRequestScenarios")
+    void addAssociationWithInvalidRequestBodyReturnsBadRequest( final String body ) throws Exception {
         mockers.mockUsersServiceFetchUserDetails( "9999" );
 
         mockMvc.perform(post(ASSOCIATIONS)
@@ -472,21 +467,7 @@ class UserCompanyAssociationsTest extends BaseMongoIntegration {
                         .header(ERIC_IDENTITY_TYPE, "key")
                         .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
                         .contentType( MediaType.APPLICATION_JSON )
-                        .content( "{\"company_number\":\"$$$$$$\", \"user_id\":\"9999\"}" ) )
-                .andExpect( status().isBadRequest() );
-    }
-
-    @Test
-    void addAssociationWithMalformedUserIdReturnsBadRequest() throws Exception {
-        mockers.mockUsersServiceFetchUserDetails( "9999" );
-
-        mockMvc.perform(post(ASSOCIATIONS)
-                        .header(ERIC_IDENTITY, "9999")
-                        .header(X_REQUEST_ID, X_REQUEST_ID_VALUE)
-                        .header(ERIC_IDENTITY_TYPE, "key")
-                        .header(ERIC_AUTHORISED_KEY_ROLES, KEY_ROLES_VALUE)
-                        .contentType( MediaType.APPLICATION_JSON )
-                        .content( "{\"company_number\":\"333333\", \"user_id\":\"$$$$\"}" ) )
+                        .content( body ) )
                 .andExpect( status().isBadRequest() );
     }
 
