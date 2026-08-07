@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
@@ -324,7 +324,6 @@ class UserCompanyInvitationsTest {
     @Test
     void inviteUserWhereAssociationBetweenInviteeEmailAndCompanyNumberExistsAndInviteeUserIsFoundPerformsSwapAndUpdateOperations() throws Exception {
         final var associationDao = testDataManager.fetchAssociationDaos( "36" ).getFirst();
-        final var companyDetails = testDataManager.fetchCompanyDetailsDtos( "444444" ).getFirst();
 
         mockers.mockUsersServiceFetchUserDetails( "9999" );
         mockers.mockCompanyServiceFetchCompanyProfile( "444444" );
@@ -350,7 +349,6 @@ class UserCompanyInvitationsTest {
     @Test
     void inviteUserWhereAssociationBetweenInviteeEmailAndCompanyNumberExistsAndInviteeUserIsNotFoundDoesNotPerformSwapButDoesPerformUpdateOperation() throws Exception {
         final var associationDao = testDataManager.fetchAssociationDaos( "36" ).getFirst();
-        final var companyDetails = testDataManager.fetchCompanyDetailsDtos( "444444" ).getFirst();
 
         mockers.mockUsersServiceFetchUserDetails( "9999" );
         mockers.mockCompanyServiceFetchCompanyProfile( "444444" );
@@ -376,7 +374,6 @@ class UserCompanyInvitationsTest {
     @Test
     void inviteUserWhereInviteeUserIsFoundAndAssociationBetweenInviteeUserIdAndCompanyNumberExistsDoesNotPerformSwapButDoesPerformUpdateOperation() throws Exception {
         final var targetUserAssociation = testDataManager.fetchAssociationDaos( "36" ).getFirst();
-        final var companyDetails = testDataManager.fetchCompanyDetailsDtos( "444444" ).getFirst();
 
         mockers.mockUsersServiceSearchUserDetails( "000" );
         mockers.mockCompanyServiceFetchCompanyProfile( "444444" );
@@ -402,7 +399,6 @@ class UserCompanyInvitationsTest {
     @Test
     void inviteUserWhereInviteeUserIsFoundAndAssociationBetweenInviteeUserIdAndCompanyNumberDoesNotExistCreatesNewAssociation() throws Exception {
         final var association = testDataManager.fetchAssociationDaos( "19" ).getFirst();
-        final var companyDetails = testDataManager.fetchCompanyDetailsDtos( "444444" ).getFirst();
 
         mockers.mockUsersServiceFetchUserDetails( "9999" );
         mockers.mockCompanyServiceFetchCompanyProfile( "444444" );
@@ -430,7 +426,6 @@ class UserCompanyInvitationsTest {
     @Test
     void inviteUserWhereAssociationBetweenInviteeUserEmailAndCompanyNumberDoesNotExistAndInviteeUserIsNotFoundCreatesNewAssociation() throws Exception {
         final var newAssociation = testDataManager.fetchAssociationDaos( "36" ).getFirst();
-        final var companyDetails = testDataManager.fetchCompanyDetailsDtos( "444444" ).getFirst();
 
         mockers.mockUsersServiceFetchUserDetails( "9999" );
         mockers.mockCompanyServiceFetchCompanyProfile( "444444" );
@@ -493,7 +488,6 @@ class UserCompanyInvitationsTest {
 
     @Test
     void inviteUserCanBeAppliedToMigratedAssociationsWithUserId() throws Exception {
-        final var targetCompany = testDataManager.fetchCompanyDetailsDtos( "MKCOMP001" ).getFirst();
         final var targetAssociation = testDataManager.fetchAssociationDaos( "MKAssociation001" ).getFirst();
 
         mockers.mockUsersServiceFetchUserDetails( "MKUser002" );
@@ -515,7 +509,6 @@ class UserCompanyInvitationsTest {
 
     @Test
     void inviteUserCanBeAppliedToMigratedAssociationsWithUserEmail() throws Exception {
-        final var targetCompany = testDataManager.fetchCompanyDetailsDtos( "MKCOMP001" ).getFirst();
         final var targetAssociation = testDataManager.fetchAssociationDaos( "MKAssociation001" ).getFirst().userId( null ).userEmail( "mario@mushroom.kingdom" );
 
         mockers.mockUsersServiceFetchUserDetails( "MKUser002" );

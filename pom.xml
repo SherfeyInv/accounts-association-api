@@ -14,13 +14,22 @@
     <description>User and Company association.</description>
     <properties>
         <java.version>21</java.version>
-        <spring-boot.version>3.5.15</spring-boot.version>
+        <spring-boot.version>4.1.0</spring-boot.version>
 
         <!-- CH dependencies -->
-        <ch-boms.version>0.1.8</ch-boms.version>
+        <ch-boms.version>0.1.15</ch-boms.version>
 
-        <private-api-sdk-java.version>4.0.473</private-api-sdk-java.version>
+        <private-api-sdk-java.version>7.2.7</private-api-sdk-java.version>
+        <!-- although this is in ch-boms - needed here for the annotation processor path in the maven-compiler-plugin -->
         <mapstruct.version>1.6.3</mapstruct.version>
+
+        <!-- ch-core-bom (imported via ch-dependency-bom) pins tomcat.version to 10.1.57 for
+             services on Spring Boot 3, but Spring Boot 4.1.0 manages Tomcat 11.0.22
+             (Jakarta Servlet 6.1) itself. Without this override, the CH bom's older pin wins
+             and silently downgrades Tomcat below what Spring Boot 4 expects. Override here to
+             the latest patched Tomcat 11.x line until ch-boms tracks Spring Boot major version
+             (see ch-ai-dev spring-boot-4-migration skill / ch-core-bom follow-up). -->
+        <tomcat.version>11.0.24</tomcat.version>
 
         <!-- Maven Plugins -->
         <maven.compiler.release>${java.version}</maven.compiler.release>
@@ -52,11 +61,26 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- CVE-2024-25710, CVE-2024-26308 -->
+            <!-- ch-core-bom (imported transitively via ch-dependency-bom) pins tomcat.version
+                 to 10.1.57, which is correct for Spring Boot 3 services but downgrades Tomcat
+                 below what Spring Boot 4.1.0 itself manages (11.0.22, Jakarta Servlet 6.1).
+                 Override explicitly here to the latest patched Tomcat 11.x release until
+                 ch-boms tracks Spring Boot major version (see ch-ai-dev
+                 spring-boot-4-migration skill / ch-core-bom follow-up). -->
             <dependency>
-                <groupId>org.apache.commons</groupId>
-                <artifactId>commons-compress</artifactId>
-                <version>1.27.1</version>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>${tomcat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-websocket</artifactId>
+                <version>${tomcat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-el</artifactId>
+                <version>${tomcat.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -123,6 +147,17 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Spring Boot 4 moved MockMvc/servlet-based test slice support (@WebMvcTest,
+             @AutoConfigureMockMvc) out of spring-boot-test-autoconfigure into this dedicated
+             module. Depend on it directly rather than the all-encompassing
+             spring-boot-starter-test-classic, which drags in unused test slices (gRPC, R2DBC,
+             Neo4j, etc.) whose auto-configuration classes reference optional dependencies not
+             on this project's classpath and fail application context startup. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
@@ -155,7 +190,7 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>mongodb</artifactId>
+            <artifactId>testcontainers-mongodb</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

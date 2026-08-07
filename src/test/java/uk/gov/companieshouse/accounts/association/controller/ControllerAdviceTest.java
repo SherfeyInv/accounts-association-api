@@ -5,10 +5,11 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -67,6 +68,7 @@ class ControllerAdviceTest {
 
     @BeforeEach
     void setup() {
+        ReflectionTestUtils.setField( staticPropertyUtil, "APPLICATION_NAMESPACE", "accounts-association-api" );
         mockMvc = MockMvcBuilders.webAppContextSetup( context )
                 .apply( SecurityMockMvcConfigurers.springSecurity() )
                 .build();
